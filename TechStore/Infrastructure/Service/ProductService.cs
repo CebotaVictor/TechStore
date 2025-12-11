@@ -1,102 +1,103 @@
 ﻿using Application.Interface;
 using Application.Interfaces.Repository;
 using Application.Models;
+using Application.Models.DTO.Product;
 using Domain.Entity;
+using MassTransit;
 using Microsoft.Extensions.Options;
 using MongoDB.Driver;
 
-public class ProductService : IProductService
-    
+namespace Application.Services
 {
-    private readonly IMongoCollection<Product> _productsCollection;
-    // We need the Category collection to enforce the Foreign Key constraint
-    private readonly IMongoCollection<Category> _categoriesCollection;
-
-    public ProductService(IOptions<StoreDatabaseSettings> storeDatabaseSettings)
+    public class ProductService : IProductService
     {
-        var mongoClient = new MongoClient(
-            storeDatabaseSettings.Value.ConnectionString);
+        private readonly IMongoCollection<Product> _productsCollection;   // Master (Writes)
+        private readonly IMongoCollection<Product> _warehouseCollection;  // Slaves (Reads)
+        private readonly IPublishEndpoint _publishEndpoint;
 
-        var connectionString = storeDatabaseSettings.Value.ConnectionString;
-
-        if (storeDatabaseSettings.Value == null || string.IsNullOrEmpty(connectionString))
+        public ProductService(IOptions<ProductDatabaseSettings> settings, IPublishEndpoint publishEndpoint)
         {
-            throw new InvalidOperationException("MongoDB ConnectionString is null. Check appsettings.json or Docker environment variables.");
+            _publishEndpoint = publishEndpoint;
+            var dbSettings = settings.Value;
+
+            if (string.IsNullOrEmpty(dbSettings.ConnectionString))
+            {
+                throw new InvalidOperationException("ProductDb ConnectionString is null.");
+            }
+
+            var mongoClient = new MongoClient(dbSettings.ConnectionString);
+            var mongoDatabase = mongoClient.GetDatabase(dbSettings.DatabaseName);
+
+            // 1. Master Connection (Writes)
+            _productsCollection = mongoDatabase.GetCollection<Product>(
+                dbSettings.ProductsCollectionName);
+
+            // 2. Warehouse Connection (Reads - Secondary Preferred)
+            var slaveSettings = new MongoCollectionSettings
+            {
+                ReadPreference = ReadPreference.SecondaryPreferred
+            };
+
+            _warehouseCollection = _productsCollection.Database
+                .GetCollection<Product>(dbSettings.ProductsCollectionName, slaveSettings);
         }
 
-        var mongoDatabase = mongoClient.GetDatabase(
-            storeDatabaseSettings.Value.DatabaseName);
-
-        _productsCollection = mongoDatabase.GetCollection<Product>(
-            storeDatabaseSettings.Value.ProductsCollectionName);
-
-        _categoriesCollection = mongoDatabase.GetCollection<Category>(
-            storeDatabaseSettings.Value.CategoriesCollectionName);
-    }
-
-   
-    public async Task<IEnumerable<Product>> GetAllAsync()
-    {
-        // Define settings to prefer reading from Slave nodes
-        var slaveSettings = new MongoCollectionSettings
+        // READ: From Slave
+        public async Task<IEnumerable<Product>> GetAllAsync()
         {
-            ReadPreference = ReadPreference.SecondaryPreferred
-        };
-
-        // Create a temporary collection handle that points to the slaves
-        var warehouseCollection = _productsCollection.Database
-            .GetCollection<Product>(_productsCollection.CollectionNamespace.CollectionName, slaveSettings);
-
-        return await warehouseCollection.Find(_ => true).ToListAsync();
-    }
-
-
-    
-    public async Task<Product?> GetByIdAsync(string id) =>
-        await _productsCollection.Find(x => x.Id == id).FirstOrDefaultAsync();
-
-    
-    public async Task CreateAsync(Product newProduct)
-    {
-        // CONSTRAINT CHECK: Does this Category actually exist?
-        var categoryExists = await _categoriesCollection
-            .Find(c => c.Id == newProduct.CategoryId)
-            .AnyAsync();
-
-        if (!categoryExists)
-        {
-            throw new Exception($"Integrity Error: Category with ID '{newProduct.CategoryId}' does not exist.");
+            return await _warehouseCollection.Find(_ => true).ToListAsync();
         }
 
-        // If valid, write to Master
-        await _productsCollection.InsertOneAsync(newProduct);
-    }
+        // READ: From Master (Consistency)
+        public async Task<Product?> GetByIdAsync(string id) =>
+            await _productsCollection.Find(x => x.Id == id).FirstOrDefaultAsync();
 
-    public async Task<IEnumerable<Product>> GetProductsByCategoryIdAsync(string categoryId)
-    {
-        // Simple filter: Find all products where the CategoryId matches the input
-        return await _productsCollection
-            .Find(p => p.CategoryId == categoryId)
-            .ToListAsync();
-    }
 
-    public async Task UpdateAsync(string id, Product updatedProduct)
-    {
-        // CONSTRAINT CHECK: Check validity again, as the user might be changing the category
-        var categoryExists = await _categoriesCollection
-            .Find(c => c.Id == updatedProduct.CategoryId)
-            .AnyAsync();
-
-        if (!categoryExists)
+        // WRITE: Create + Broadcast
+        public async Task CreateAsync(Product newProduct)
         {
-            throw new Exception($"Integrity Error: Category with ID '{updatedProduct.CategoryId}' does not exist.");
+            // 1. Publish to RabbitMQ (Notify other nodes)
+            await _publishEndpoint.Publish(new ProductCreatedEvent
+            {
+                Id = newProduct.Id,
+                Name = newProduct.Name,
+                Price = newProduct.Price,
+                lastChanged = DateTime.UtcNow
+            });
+
+            // 2. Write to Local Master
+            await _productsCollection.InsertOneAsync(newProduct);
         }
 
-        await _productsCollection.ReplaceOneAsync(x => x.Id == id, updatedProduct);
+        // WRITE: Update + Broadcast
+        public async Task UpdateAsync(string id, Product updatedProduct)
+        {
+            updatedProduct.Id = id;
+
+            // 1. Publish to RabbitMQ
+            await _publishEndpoint.Publish(new ProductUpdateEvent
+            {
+                Id = updatedProduct.Id,
+                Name = updatedProduct.Name,
+                Price = updatedProduct.Price,
+                lastChanged = DateTime.UtcNow
+            });
+
+            // 2. Write to Local Master
+            await _productsCollection.ReplaceOneAsync(x => x.Id == id, updatedProduct);
+        }
+
+        // WRITE: Delete + Broadcast
+        public async Task RemoveAsync(string id)
+        {
+            // 1. Publish to RabbitMQ
+            await _publishEndpoint.Publish(new ProductDeleteEvent
+            {
+                Id = id,
+            });
+
+            // 2. Delete from Local Master
+            await _productsCollection.DeleteOneAsync(x => x.Id == id);
+        }
     }
-
-
-    public async Task RemoveAsync(string id) =>
-        await _productsCollection.DeleteOneAsync(x => x.Id == id);
-
 }

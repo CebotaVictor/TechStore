@@ -1,65 +1,157 @@
-version: '3.8'
-
 services:
-  # 1. API Service
-  api:
-    build:
-      context: .
-      dockerfile: TechStore/Dockerfile
-    expose: 
-      - "8080"
-    environment:
-      - RecordStreamDatabase:ConnectionString=mongodb://mongo1:27017,mongo2:27017,mongo3:27017/?replicaSet=rs0
-      - RecordStreamDatabase:DatabaseName=PAD
-      - RecordStreamDatabase:ProductsCollectionName=Products
-      - RecordStreamDatabase:CategoriesCollectionName=Category
-      - ASPNETCORE_ENVIRONMENT=Developmen
-
-    depends_on:
-      - mongo-setup
+  # ==========================================
+  # 1. INFRASTRUCTURE: RabbitMQ & NGINX
+  # ==========================================
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq
+    ports:
+      - "15672:15672"
+      - "5672:5672"
     networks:
       - proxy-tier
-      - data-tier
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-  # 2. NGINX Gateway
   nginx:
     image: nginx:latest
     container_name: nginx_gateway
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro 
     ports:
-
-      # FIX: Mapped to 8080 to avoid Windows Port 80 conflict
       - "8080:80" 
     depends_on:
-      - api
+      - warehouse-a
+      - warehouse-b
+      - warehouse-c
     networks:
       - proxy-tier
 
-  # 3. MongoDB Replica Set (Standard)
+  # ==========================================
+  # 2. WAREHOUSE A (Primary Database: PAD_A)
+  # ==========================================
+  warehouse-a:
+    build:
+      context: .
+      dockerfile: TechStore/Dockerfile
+    expose: 
+      - "8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - RabbitMq:Host=rabbitmq
+      # CONNECTS TO DATABASE: PAD_A
+      - ProductDb__ConnectionString=mongodb://mongo1:27017,mongo2:27017,mongo3:27017/?replicaSet=rs_prod
+      - ProductDb__DatabaseName=PAD_A
+      - ProductDb__ProductsCollectionName=Products
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      mongo-prod-setup:
+        condition: service_completed_successfully
+    networks:
+      - proxy-tier
+      - data-tier
+
+  # ==========================================
+  # 3. WAREHOUSE B (Primary Database: PAD_B)
+  # ==========================================
+  warehouse-b:
+    build:
+      context: .
+      dockerfile: TechStore/Dockerfile
+    expose: 
+      - "8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - RabbitMq:Host=rabbitmq
+      # CONNECTS TO DATABASE: PAD_B
+      - ProductDb__ConnectionString=mongodb://mongo1:27017,mongo2:27017,mongo3:27017/?replicaSet=rs_prod
+      - ProductDb__DatabaseName=PAD_B
+      - ProductDb__ProductsCollectionName=Products
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      mongo-prod-setup:
+        condition: service_completed_successfully
+    networks:
+      - proxy-tier
+      - data-tier
+
+  # ==========================================
+  # 4. WAREHOUSE C (Primary Database: PAD_C)
+  # ==========================================
+  warehouse-c:
+    build:
+      context: .
+      dockerfile: TechStore/Dockerfile
+    expose: 
+      - "8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - RabbitMq:Host=rabbitmq
+      # CONNECTS TO DATABASE: PAD_C
+      - ProductDb__ConnectionString=mongodb://mongo1:27017,mongo2:27017,mongo3:27017/?replicaSet=rs_prod
+      - ProductDb__DatabaseName=PAD_C
+      - ProductDb__ProductsCollectionName=Products
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      mongo-prod-setup:
+        condition: service_completed_successfully
+    networks:
+      - proxy-tier
+      - data-tier
+
+  # ==========================================
+  # 5. SHARED MONGODB CLUSTER (rs_prod)
+  # ==========================================
   mongo1:
     image: mongo:latest
     container_name: mongo1
-    command: ["--replSet", "rs0", "--bind_ip_all", "--port", "27017"]
-    networks:
-      - data-tier
-  mongo2:
-    image: mongo:latest
-    container_name: mongo2
-    command: ["--replSet", "rs0", "--bind_ip_all", "--port", "27017"]
-    networks:
-      - data-tier
-  mongo3:
-    image: mongo:latest
-    container_name: mongo3
-    command: ["--replSet", "rs0", "--bind_ip_all", "--port", "27017"]
+    command: ["--replSet", "rs_prod", "--bind_ip_all", "--port", "27017"]
+    ports:
+      - "27017:27017" # Host Port 27017 -> Container Port 27017 (Primary)
     networks:
       - data-tier
 
-  # 4. MongoDB Setup
-  mongo-setup:
+  mongo2:
     image: mongo:latest
-    container_name: mongo_setup
+    container_name: mongo2
+    command: ["--replSet", "rs_prod", "--bind_ip_all", "--port", "27017"]
+    ports:
+      - "27018:27017" # Host Port 27018 -> Container Port 27017 (Slave 1)
+    networks:
+      - data-tier
+
+  mongo3:
+    image: mongo:latest
+    container_name: mongo3
+    command: ["--replSet", "rs_prod", "--bind_ip_all", "--port", "27017"]
+    ports:
+      - "27019:27017" # Host Port 27019 -> Container Port 27017 (Slave 2)
+    networks:
+      - data-tier
+
+  storefront:
+    build:
+      context: .
+      dockerfile: StoreFront/Dockerfile
+    ports:
+      - "5000:80"   # Keep this as is
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_HTTP_PORTS=80  # <--- ADD THIS LINE
+    depends_on:
+      - nginx
+    networks:
+      - proxy-tier
+
+  mongo-prod-setup:
+    image: mongo:latest
+    container_name: mongo_prod_setup
     depends_on:
       - mongo1
       - mongo2
@@ -69,7 +161,7 @@ services:
     command: >
       mongosh --host mongo1:27017 --eval 
       'rs.initiate({
-        _id: "rs0",
+        _id: "rs_prod",
         members: [
           { _id: 0, host: "mongo1:27017" },
           { _id: 1, host: "mongo2:27017" },

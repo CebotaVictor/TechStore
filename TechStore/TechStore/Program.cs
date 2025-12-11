@@ -2,6 +2,7 @@ using Application.Models;
 using Asp.Versioning;
 using Asp.Versioning.ApiExplorer; // REQUIRED: Make sure this package is installed
 using Microsoft.AspNetCore.Builder;
+using Microsoft.Extensions.Configuration;
 using TechStore.Endpoints.Categories;
 using TechStore.Endpoints.Products;
 using TechStore.Extensions;
@@ -14,9 +15,14 @@ namespace TechStore
         {
             var builder = WebApplication.CreateBuilder(args);
 
-            // 1. Database Config
-            builder.Services.Configure<StoreDatabaseSettings>(
-                builder.Configuration.GetSection("RecordStreamDatabase"));
+            // 1. Bind "CategoryDb" section -> CategoryDatabaseSettings Class
+            builder.Services.Configure<CategoryDatabaseSettings>(
+                builder.Configuration.GetSection("CategoryDb"));
+
+            // 2. Bind "ProductDb" section -> ProductDatabaseSettings Class
+            builder.Services.Configure<ProductDatabaseSettings>(
+                builder.Configuration.GetSection("ProductDb"));
+
 
             builder.Services.AddApplicationServices(builder.Configuration);
             builder.Services.AddAuthorization();
@@ -52,7 +58,7 @@ namespace TechStore
             app.UseHttpsRedirection();
             app.UseAuthorization();
 
-            app.MapCategoryEndpoints();
+            //app.MapCategoryEndpoints();
             app.MapProductEndpoints();
 
             app.Run();

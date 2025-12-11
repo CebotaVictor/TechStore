@@ -19,9 +19,6 @@ namespace Domain.Entity
 
         public decimal Price { get; set; }
 
-        // acts as a "Foreign Key"
-        [BsonRepresentation(BsonType.ObjectId)]
-        [BsonElement("categoryId")]
-        public string CategoryId { get; set; } = string.Empty;
+        public DateTime lastChanged { get; set;} = DateTime.UtcNow;
     }
 }

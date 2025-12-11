@@ -41,18 +41,18 @@ namespace TechStore.Endpoints.Products
                 }
             }).WithOpenApi();
 
-            routeBuilder.MapGet("/products/category/{categoryId}", async (string categoryId, IProductService service) =>
-            {
-                try
-                {
-                    var products = await service.GetProductsByCategoryIdAsync(categoryId);
-                    return Results.Ok(products);
-                }
-                catch (Exception ex)
-                {
-                    return Results.Problem(ex.Message);
-                }
-            }).WithOpenApi();
+            //routeBuilder.MapGet("/products/category/{categoryId}", async (string categoryId, IProductService service) =>
+            //{
+            //    try
+            //    {
+            //        var products = await service.GetProductsByCategoryIdAsync(categoryId);
+            //        return Results.Ok(products);
+            //    }
+            //    catch (Exception ex)
+            //    {
+            //        return Results.Problem(ex.Message);
+            //    }
+            //}).WithOpenApi();
 
             routeBuilder.MapPost("/products", async (ProductDTO newProduct, IProductService service) =>
             {
@@ -64,7 +64,6 @@ namespace TechStore.Endpoints.Products
                         Id = ObjectId.GenerateNewId().ToString(),
                         Name = newProduct.Name,
                         Price = newProduct.Price,
-                        CategoryId = newProduct.CategoryId
                     };
 
                     await service.CreateAsync(product);

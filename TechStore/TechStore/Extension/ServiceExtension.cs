@@ -2,7 +2,10 @@
 using Application.Interfaces.Repository;
 using Application.Models;
 using Application.Services;
+using Application.Models.DTO;
 using Domain.Entity;
+using Infrastructure.ConsumerService;
+using MassTransit;
 
 namespace TechStore.Extensions
 {
@@ -10,17 +13,40 @@ namespace TechStore.Extensions
     {
         public static IServiceCollection AddApplicationServices(this IServiceCollection services, IConfiguration configuration)
         {
-            // Configure database settings from appsettings.json
-            services.Configure<StoreDatabaseSettings>(
-                configuration.GetSection("StoreDatabase"));
+            // 1. Scoped Services
+            services.AddScoped<ICategoryService, CategoryService>();
+            services.AddScoped<IProductService, ProductService>();
 
-            // Register ProductService for its interfaces
-            services.AddSingleton<ProductService>();
-            services.AddSingleton<IProductService>(sp => sp.GetRequiredService<ProductService>());
+            // 2. MassTransit (CRITICAL: This must be here for RabbitMQ to work)
+            services.AddMassTransit(x => {
+                x.AddConsumer<ProductEventsConsumer>();
+                x.AddConsumer<CategoryEventsConsumer>();
 
-            // Register CategoryService for its interfaces
-            services.AddSingleton<CategoryService>();
-            services.AddSingleton<ICategoryService>(sp => sp.GetRequiredService<CategoryService>());
+                x.UsingRabbitMq((context, cfg) =>
+                {
+                    // Default to "rabbitmq" (Docker), fallback to localhost
+                    var rabbitHost = configuration["RabbitMq:Host"] ?? "rabbitmq";
+
+                    cfg.UseRawJsonSerializer();
+
+                    cfg.Host(rabbitHost, "/", h => {
+                        h.Username("guest");
+                        h.Password("guest");
+                    });
+
+                    cfg.UseRawJsonSerializer(); // Good practice
+
+                    // CRITICAL: This creates a unique queue for THIS specific container
+                    // e.g., "product-updates-c3f4a1..."
+                    var uniqueQueueName = $"product-updates-{Environment.MachineName}";
+
+                    cfg.ReceiveEndpoint(uniqueQueueName, e =>
+                    {
+                        e.ConfigureConsumer<ProductEventsConsumer>(context);
+                    });
+
+                });
+            });
 
             return services;
         }

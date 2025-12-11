@@ -1,0 +1,81 @@
+name: CI/CD Pipeline
+
+# ---------------------------------------------------------
+# 1. TRIGGERS
+# Run on push to 'master' OR manual click in GitHub UI
+# ---------------------------------------------------------
+on:
+  push:
+    branches: [ "master" ]
+  workflow_dispatch:
+
+jobs:
+  # ---------------------------------------------------------
+  # JOB 1: BUILD & PUSH IMAGES TO DOCKER HUB
+  # ---------------------------------------------------------
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      # 1. Build Backend API (Warehouse Code)
+      - name: Build and Push Backend
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: TechStore/Dockerfile
+          push: true
+          # Tags it as 'latest' so the server always pulls the new code
+          tags: ${{ secrets.DOCKER_USERNAME }}/techstore:backend-latest
+
+      # 2. Build Frontend UI (StoreFront)
+      - name: Build and Push Frontend
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: StoreFront/Dockerfile
+          push: true
+          tags: ${{ secrets.DOCKER_USERNAME }}/techstore:frontend-latest
+
+  # ---------------------------------------------------------
+  # JOB 2: DEPLOY TO DIGITALOCEAN DROPLET
+  # ---------------------------------------------------------
+  deploy:
+    needs: build-and-push # Wait for build to finish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v0.1.10
+        with:
+          host: ${{ secrets.DROPLET_IP }}
+          username: root
+          password: ${{ secrets.DROPLET_PASSWORD }}
+          # If using SSH Key instead of password, uncomment below:
+          # key: ${{ secrets.SSH_PRIVATE_KEY }}
+          
+          # The script to run on your remote server
+          script: |
+            # 1. Navigate to your project folder (Created manually once)
+            cd /opt/techstore
+
+            # 2. Stop the current system
+            echo "Stopping containers..."
+            docker-compose down
+
+            # 3. Pull the new images we just pushed
+            echo "Pulling latest images..."
+            docker-compose pull
+
+            # 4. Start the system (Background mode)
+            echo "Starting new version..."
+            docker-compose up -d
+
+            # 5. Cleanup unused images to save disk space on 1 CPU Droplet
+            docker image prune -f

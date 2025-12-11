@@ -2,7 +2,6 @@ name: CI/CD Pipeline
 
 # ---------------------------------------------------------
 # 1. TRIGGERS
-# Run on push to 'master' OR manual click in GitHub UI
 # ---------------------------------------------------------
 on:
   push:
@@ -11,7 +10,7 @@ on:
 
 jobs:
   # ---------------------------------------------------------
-  # JOB 1: BUILD & PUSH IMAGES TO DOCKER HUB
+  # JOB 1: BUILD & PUSH
   # ---------------------------------------------------------
   build-and-push:
     runs-on: ubuntu-latest
@@ -19,32 +18,28 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v3
 
-        # === ADD THIS DEBUG BLOCK ===
-      - name: DEBUG - List all files
-        run: |
-          echo " ROOT DIRECTORY:"
-          ls -la
-        
-          echo "SUBDIRECTORIES:"
-          ls -R
-
       - name: Log in to Docker Hub
         uses: docker/login-action@v2
         with:
-          username: mistic1265
-          password: Docker@@123Hub
+          username: mistic1265  # <--- SECURE
+          password: Docker@@123Hub  # <--- SECURE
 
-      # 1. Build Backend API (Warehouse Code)
+      # ---------------------------------------------------
+      # BUILD BACKEND (API)
+      # ---------------------------------------------------
       - name: Build and Push Backend
         uses: docker/build-push-action@v4
         with:
+          # Sets "TechStore" folder as the root for the build (so it sees Infrastructure)
           context: TechStore
+          # Points to the Dockerfile inside the project folder
           file: TechStore/TechStore/Dockerfile
           push: true
-          # Tags it as 'latest' so the server always pulls the new code
           tags: mistic1265/pad_lab4:backend-latest
 
-      # 2. Build Frontend UI (StoreFront)
+      # ---------------------------------------------------
+      # BUILD FRONTEND (STOREFRONT)
+      # ---------------------------------------------------
       - name: Build and Push Frontend
         uses: docker/build-push-action@v4
         with:
@@ -54,37 +49,34 @@ jobs:
           tags: mistic1265/pad_lab4:frontend-latest
 
   # ---------------------------------------------------------
-  # JOB 2: DEPLOY TO DIGITALOCEAN DROPLET
+  # JOB 2: DEPLOY TO SERVER
   # ---------------------------------------------------------
   deploy:
-    needs: build-and-push # Wait for build to finish
+    needs: build-and-push
     runs-on: ubuntu-latest
     steps:
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v0.1.10
         with:
-          host: 146.190.158.164
+          host: 146.190.158.164        # <--- SECURE
           username: root
-          password: root@@123Digital
-          # If using SSH Key instead of password, uncomment below:
-          # key: ${{ secrets.SSH_PRIVATE_KEY }}
-          
-          # The script to run on your remote server
+          password: root@@123Digital # <--- SECURE
           script: |
-            # 1. Navigate to your project folder (Created manually once)
+            # 1. Navigate to project folder
             cd /opt/techstore
 
-            # 2. Stop the current system
-            echo "Stopping containers..."
-            docker-compose down
+            # 2. Stop containers (Using new V2 command syntax)
+            echo "Stopping current containers..."
+            docker compose down
 
-            # 3. Pull the new images we just pushed
+            # 3. Pull new images
             echo "Pulling latest images..."
-            docker-compose pull
+            docker compose pull
 
-            # 4. Start the system (Background mode)
+            # 4. Start updated system
             echo "Starting new version..."
-            docker-compose up -d
+            docker compose up -d
 
-            # 5. Cleanup unused images to save disk space on 1 CPU Droplet
+            # 5. Cleanup space
+            echo "Cleaning up unused images..."
             docker image prune -f

@@ -33,7 +33,7 @@ jobs:
           file: TechStore/Dockerfile
           push: true
           # Tags it as 'latest' so the server always pulls the new code
-          tags: mistic1265/techstore:backend-latest
+          tags: mistic1265/pad_lab4:backend-latest
 
       # 2. Build Frontend UI (StoreFront)
       - name: Build and Push Frontend
@@ -42,7 +42,7 @@ jobs:
           context: .
           file: StoreFront/Dockerfile
           push: true
-          tags: mistic1265/techstore:frontend-latest
+          tags: mistic1265/pad_lab4:frontend-latest
 
   # ---------------------------------------------------------
   # JOB 2: DEPLOY TO DIGITALOCEAN DROPLET

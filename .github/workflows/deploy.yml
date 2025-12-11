@@ -19,6 +19,15 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v3
 
+        # === ADD THIS DEBUG BLOCK ===
+      - name: DEBUG - List all files
+        run: |
+          echo " ROOT DIRECTORY:"
+          ls -la
+        
+          echo "SUBDIRECTORIES:"
+          ls -R
+
       - name: Log in to Docker Hub
         uses: docker/login-action@v2
         with:
@@ -30,7 +39,7 @@ jobs:
         uses: docker/build-push-action@v4
         with:
           context: .
-          file: techStore/Dockerfile
+          file: techstore/Dockerfile
           push: true
           # Tags it as 'latest' so the server always pulls the new code
           tags: mistic1265/pad_lab4:backend-latest
@@ -40,7 +49,7 @@ jobs:
         uses: docker/build-push-action@v4
         with:
           context: .
-          file: storeFront/Dockerfile
+          file: storefront/Dockerfile
           push: true
           tags: mistic1265/pad_lab4:frontend-latest
 

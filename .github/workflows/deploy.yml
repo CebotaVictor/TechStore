@@ -33,7 +33,7 @@ jobs:
           file: TechStore/Dockerfile
           push: true
           # Tags it as 'latest' so the server always pulls the new code
-          tags: ${{ secrets.DOCKER_USERNAME }}/techstore:backend-latest
+          tags: mistic1265/techstore:backend-latest
 
       # 2. Build Frontend UI (StoreFront)
       - name: Build and Push Frontend

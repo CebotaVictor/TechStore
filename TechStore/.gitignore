@@ -7,6 +7,6 @@ Infrastructure/obj
 TechStore/.vs
 TechStore/obj
 TechStore/bin
-.vs
+.vs/
 StoreFront/bin
 StoreFront/obj

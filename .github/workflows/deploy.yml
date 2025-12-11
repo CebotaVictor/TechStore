@@ -39,7 +39,7 @@ jobs:
         uses: docker/build-push-action@v4
         with:
           context: TechStore
-          file: TechStore/Dockerfile
+          file: TechStore/TechStore/Dockerfile
           push: true
           # Tags it as 'latest' so the server always pulls the new code
           tags: mistic1265/pad_lab4:backend-latest
@@ -49,7 +49,7 @@ jobs:
         uses: docker/build-push-action@v4
         with:
           context: TechStore
-          file: StoreFront/Dockerfile
+          file: TechStore/StoreFront/Dockerfile
           push: true
           tags: mistic1265/pad_lab4:frontend-latest
 
